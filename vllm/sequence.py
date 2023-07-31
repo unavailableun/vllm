@@ -218,7 +218,7 @@ class SequenceGroup:
         new_seqs: List[Sequence] = []
         for seq in self.seqs:
             last_token_id = seq.get_last_token_id()
-            if last_token_id not in self.reference_dict:
+            if last_token_id in self.reference_dict:
                 new_seqs.append(Sequence(
                     seq_id=-seq.seq_id,
                     prompt_token_ids=seq.get_token_ids()+[self.reference_dict[last_token_id]],
