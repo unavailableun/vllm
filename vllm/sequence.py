@@ -221,6 +221,7 @@ class SequenceGroup:
             if last_token_id in self.reference_dict:
                 new_seqs.append(Sequence(
                     seq_id=-seq.seq_id,
+                    prompt=seq.prompt,
                     prompt_token_ids=seq.get_token_ids()+[self.reference_dict[last_token_id]],
                     block_size=seq.block_size,
                 ))
