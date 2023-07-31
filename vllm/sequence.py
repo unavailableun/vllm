@@ -206,6 +206,25 @@ class SequenceGroup:
         self.seqs = seqs
         self.sampling_params = sampling_params
         self.arrival_time = arrival_time
+        self.reference_dict: Dict[int, List[int]] = {}
+        for seq in self.seqs:
+            token_ids = seq.get_token_ids()
+            for i in range(len(token_ids) - 1):
+                self.reference_dict[token_ids[i]] = token_ids[i + 1:]
+
+    def expand_ref_seqs(self) -> None:
+        if self.num_seqs() == 2:
+            return
+        new_seqs: List[Sequence] = []
+        for seq in self.seqs:
+            last_token_id = seq.get_last_token_id()
+            if last_token_id not in self.reference_dict:
+                new_seqs.append(Sequence(
+                    seq_id=-seq.seq_id,
+                    prompt_token_ids=seq.get_token_ids()+self.reference_dict[last_token_id],
+                    block_size=seq.block_size,
+                ))
+        self.seqs += new_seqs
 
     def get_seqs(
         self,

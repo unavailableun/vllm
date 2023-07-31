@@ -276,10 +276,17 @@ class Scheduler:
                         f"CPU KV cache usage: {cpu_cache_usage * 100:.1f}%")
         return scheduler_outputs, prompt_group_ids, ignored_seq_groups
 
+    def expand_ref_seqs(self) -> None:
+        for seq_group in self.running:
+            seq_group.expand_ref_seqs()
+
     def schedule(
         self
     ) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs,
                List[SequenceGroup]]:
+        # expand seq_group to include reference sequences
+        self.expand_ref_seqs()
+
         # Schedule sequence groups.
         # This function call changes the internal states of the scheduler
         # such as self.running, self.swapped, and self.waiting.
@@ -312,6 +319,7 @@ class Scheduler:
         self,
         seq_outputs: Dict[int, SequenceOutputs],
     ) -> List[SequenceGroup]:
+        ref_correct_num = 0
         # Update the running sequences and free blocks.
         for seq_group in self.running:
             # Process beam search results before processing the new tokens.
@@ -326,11 +334,30 @@ class Scheduler:
                     parent_seq.fork(seq)
                     self.block_manager.fork(parent_seq, seq)
 
+            # merge reference sequences
+            all_seqs = seq_group.get_seqs(status=SequenceStatus.RUNNING)
+            if len(all_seqs) > 1:
+                for seq in all_seqs:
+                    if seq.seq_id < 0:
+                        ref_seq = seq
+                    else:
+                        main_seq = seq
+                main_seq_output = seq_outputs[main_seq.seq_id]
+                if main_seq_output.output_token == ref_seq.get_last_token_id():
+                    # ref_seq's predict is correct
+                    ref_correct_num += 1
+                    main_seq_id = main_seq.seq_id
+                    self.block_manager.free(main_seq)
+                    ref_seq.seq_id = main_seq_id
+                    # remove main_seq from seq_group.seqs
+                    seq_group.seqs = [seq for seq in seq_group.seqs if seq.seq_id != main_seq_id]
+
             # Process the new tokens.
             for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
                 # Append a new token to the sequence.
                 output = seq_outputs[seq.seq_id]
                 seq.append_token_id(output.output_token, output.logprobs)
+        print(f"ref_correct_num: {ref_correct_num}")
         # Return a shallow copy of the running queue to prevent the queue
         # from being modified by the caller.
         return self.running.copy()
