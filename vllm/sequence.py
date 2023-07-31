@@ -213,6 +213,7 @@ class SequenceGroup:
                 self.reference_dict[token_ids[i]] = token_ids[i + 1]
 
     def expand_ref_seqs(self) -> None:
+        print(f"Expanding reference sequences, num_seqs={self.num_seqs()}")
         if self.num_seqs() == 2:
             return
         new_seqs: List[Sequence] = []
@@ -226,6 +227,7 @@ class SequenceGroup:
                     block_size=seq.block_size,
                 ))
         self.seqs += new_seqs
+        print(f"Expanded reference sequences, num_seqs={self.num_seqs()}")
 
     def get_seqs(
         self,
@@ -243,6 +245,13 @@ class SequenceGroup:
         for seq in self.seqs:
             if seq.seq_id == seq_id:
                 return seq
+        raise ValueError(f"Sequence {seq_id} not found.")
+    
+    def remove(self, seq_id: int) -> None:
+        for seq in self.seqs:
+            if seq.seq_id == seq_id:
+                self.seqs.remove(seq)
+                return
         raise ValueError(f"Sequence {seq_id} not found.")
 
     def is_finished(self) -> bool:

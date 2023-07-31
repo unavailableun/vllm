@@ -337,6 +337,7 @@ class Scheduler:
             # merge reference sequences
             all_seqs = seq_group.get_seqs(status=SequenceStatus.RUNNING)
             if len(all_seqs) > 1:
+                print(f"merging reference sequences, len: {len(all_seqs)}")
                 for seq in all_seqs:
                     if seq.seq_id < 0:
                         ref_seq = seq
@@ -346,11 +347,16 @@ class Scheduler:
                 if main_seq_output.output_token == ref_seq.get_last_token_id():
                     # ref_seq's predict is correct
                     ref_correct_num += 1
-                    main_seq_id = main_seq.seq_id
-                    self.block_manager.free(main_seq)
-                    ref_seq.seq_id = main_seq_id
-                    # remove main_seq from seq_group.seqs
-                    seq_group.seqs = [seq for seq in seq_group.seqs if seq.seq_id != main_seq_id]
+                    keep_seq, del_seq = ref_seq, main_seq
+                else:
+                    # ref_seq's predict is wrong
+                    keep_seq, del_seq = main_seq, ref_seq
+                main_seq_id = main_seq.seq_id
+                self.block_manager.free(del_seq)
+                # remove del_seq from seq_group.seqs
+                seq_group.remove(del_seq.seq_id)
+                keep_seq.seq_id = main_seq_id
+                print(f"merged reference sequences, len: {seq_group.num_seqs(status=SequenceStatus.RUNNING)}")
 
             # Process the new tokens.
             for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
