@@ -220,12 +220,14 @@ class SequenceGroup:
         for seq in self.seqs:
             last_token_id = seq.get_last_token_id()
             if last_token_id in self.reference_dict:
-                new_seqs.append(Sequence(
+                ref_seq = Sequence(
                     seq_id=-seq.seq_id,
                     prompt=seq.prompt,
                     prompt_token_ids=seq.get_token_ids()+[self.reference_dict[last_token_id]],
                     block_size=seq.block_size,
-                ))
+                )
+                ref_seq.status = SequenceStatus.RUNNING
+                new_seqs.append(ref_seq)
         self.seqs += new_seqs
         print(f"Expanded reference sequences, num_seqs={self.num_seqs()}")
 

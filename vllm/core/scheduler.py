@@ -319,6 +319,7 @@ class Scheduler:
         self,
         seq_outputs: Dict[int, SequenceOutputs],
     ) -> List[SequenceGroup]:
+        print(f"seq_outputs length: {len(seq_outputs)}")
         ref_correct_num = 0
         # Update the running sequences and free blocks.
         for seq_group in self.running:
