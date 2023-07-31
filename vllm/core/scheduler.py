@@ -336,8 +336,8 @@ class Scheduler:
 
             # merge reference sequences
             all_seqs = seq_group.get_seqs(status=SequenceStatus.RUNNING)
+            print(f"merging reference sequences, len: {len(all_seqs)}")
             if len(all_seqs) > 1:
-                print(f"merging reference sequences, len: {len(all_seqs)}")
                 for seq in all_seqs:
                     if seq.seq_id < 0:
                         ref_seq = seq
