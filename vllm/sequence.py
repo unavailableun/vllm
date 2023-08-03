@@ -52,6 +52,7 @@ class SequenceData:
         prompt_token_ids: The token IDs of the prompt.
         output_token_ids: The token IDs of the output.
         cumulative_logprob: The cumulative log probability of the output.
+        predict_token_ids: The token IDs of the predicted tokens.
     """
 
     def __init__(
@@ -61,6 +62,12 @@ class SequenceData:
         self.prompt_token_ids = prompt_token_ids
         self.output_token_ids: List[int] = []
         self.cumulative_logprob = 0.0
+        self.predict_token_ids: List[int] = []
+        self.reference_dict: Dict[int, List[int]] = {}
+        # generate the reference dict based on the prompt
+        reference_step = 1  # TODO: make this a parameter
+        for i in range(len(prompt_token_ids) - reference_step):
+            self.reference_dict[prompt_token_ids[i]] = prompt_token_ids[i+1:i+reference_step+1]
 
     def append_token_id(self, token_id: int, logprob: float) -> None:
         self.output_token_ids.append(token_id)
@@ -269,7 +276,7 @@ class SequenceOutputs:
         seq_id: The ID of the sequence.
         parent_seq_id: The ID of the parent sequence (for forking in beam
             search).
-        output_token: The output token ID.
+        output_tokens: The output token IDs. Multiple tokens may be generated for reference case.
         logprobs: The logprobs of the output token.
             (Token id -> logP(x_i+1 | x_0, ..., x_i))
     """
@@ -278,18 +285,18 @@ class SequenceOutputs:
         self,
         seq_id: int,
         parent_seq_id: int,
-        output_token: int,
+        output_tokens: List[int],
         logprobs: Dict[int, float],
     ) -> None:
         self.seq_id = seq_id
         self.parent_seq_id = parent_seq_id
-        self.output_token = output_token
+        self.output_tokens = output_tokens
         self.logprobs = logprobs
 
     def __repr__(self) -> str:
         return (f"SequenceOutputs(seq_id={self.seq_id}, "
                 f"parent_seq_id={self.parent_seq_id}, "
-                f"output_token={self.output_token}), "
+                f"output_tokens={self.output_tokens}), "
                 f"logprobs={self.logprobs}")
 
     def __eq__(self, other: object) -> bool:
@@ -297,5 +304,5 @@ class SequenceOutputs:
             return NotImplemented
         return (self.seq_id == other.seq_id
                 and self.parent_seq_id == other.parent_seq_id
-                and self.output_token == other.output_token
+                and self.output_tokens == other.output_tokens
                 and self.logprobs == other.logprobs)

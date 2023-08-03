@@ -14,6 +14,7 @@ class InputMetadata:
         seq_groups: List of (seq_ids, sampling_params).
         seq_data: Seq_id -> SequenceData.
         prompt_lens: Lengths of prompts.
+        generation_token_lens: Lengths of generation tokens, seq_id -> length.
         slot_mapping: The address to write the new KV to of each token.
         context_lens: the length of attention context for each generation token.
         max_context_len: The maximum context length.
@@ -25,6 +26,7 @@ class InputMetadata:
         seq_groups: List[Tuple[List[int], SamplingParams]],
         seq_data: Dict[int, SequenceData],
         prompt_lens: List[int],
+        generation_token_lens: Dict[int, int],
         slot_mapping: torch.Tensor,
         context_lens: torch.Tensor,
         max_context_len: int,
@@ -40,14 +42,16 @@ class InputMetadata:
 
         self.num_prompts = len(prompt_lens)
         self.num_prompt_tokens = sum(prompt_lens)
-        self.num_generation_tokens = context_lens.shape[0]
-        self.num_valid_tokens = slot_mapping.shape[0]
+        self.generation_token_lens = generation_token_lens
+        self.num_generation_tokens = sum(generation_token_lens.values())
+        self.num_generation_seqs = len(generation_token_lens)
+        self.num_valid_tokens = slot_mapping.shape[0]  # num_prompt_tokens + num_generation_tokens
         if block_tables.numel() > 0:
             self.max_num_blocks_per_seq = block_tables.shape[1]
         else:
             self.max_num_blocks_per_seq = 0
-        assert block_tables.shape[0] == self.num_generation_tokens
-        assert context_lens.shape[0] == self.num_generation_tokens
+        # assert block_tables.shape[0] == self.num_generation_tokens
+        # assert context_lens.shape[0] == self.num_generation_tokens
 
         # Set during the execution of the first attention op.
         self.attn_bias: List[AttentionBias] = []
@@ -59,6 +63,7 @@ class InputMetadata:
                 f'num_prompt_tokens={self.num_prompt_tokens}, '
                 f'num_prompts={self.num_prompts}, '
                 f'prompt_lens={self.prompt_lens}, '
+                f'generation_token_lens={self.generation_token_lens}, '
                 f'num_generation_tokens={self.num_generation_tokens}, '
                 f'context_lens={self.context_lens}, '
                 f'max_context_len={self.max_context_len}), '

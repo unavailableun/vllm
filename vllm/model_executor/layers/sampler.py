@@ -53,7 +53,8 @@ class Sampler(nn.Module):
 
         # Apply presence and frequency penalties.
         output_tokens = _get_output_tokens(input_metadata)
-        assert len(output_tokens) == logits.shape[0]
+        # assert len(output_tokens) == logits.shape[0]
+        # TODO: handle penalty for reference case
         presence_penalties, frequency_penalties = _get_penalties(
             input_metadata)
         assert len(presence_penalties) == logits.shape[0]
@@ -78,6 +79,7 @@ class Sampler(nn.Module):
         logprobs = torch.log(probs)
 
         # Apply top-p and top-k truncation.
+        # TODO: handle top_k top_p for reference case
         top_ps, top_ks = _get_top_p_top_k(input_metadata, self.vocab_size)
         assert len(top_ps) == len(top_ks) == probs.shape[0]
         do_top_p = any(p < 1.0 - _SAMPLING_EPS for p in top_ps)
@@ -206,7 +208,8 @@ def _get_temperatures(input_metadata: InputMetadata) -> List[float]:
             temperatures.append(temperature)
         else:
             # A generation token.
-            temperatures += [temperature] * len(seq_ids)
+            for seq_id in seq_ids:
+                temperatures += [temperature] * input_metadata.generation_token_lens[seq_id]
     return temperatures
 
 
@@ -397,10 +400,11 @@ def _sample(
                 output_logprobs = next_logprobs.copy()
                 output_logprobs[next_token_id] = logprob[next_token_id].item()
                 seq_outputs[seq_id] = SequenceOutputs(seq_id, seq_id,
-                                                      next_token_id,
+                                                      [next_token_id],
                                                       output_logprobs)
         else:
             # Generate the next tokens for generation tokens.
+            # TODO: get next tokens per seq, including predict tokens.
             prob = probs[idx:idx + len(seq_ids)]
             logprob = logprobs[idx:idx + len(seq_ids)]
             idx += len(seq_ids)
@@ -420,6 +424,7 @@ def _sample(
                     logprob[j], sampling_params.logprobs)
 
             # Build the output.
+            # TODO: Adapt multiple output_tokens per seq
             for seq_id, parent_seq_id, next_token_id in zip(
                     seq_ids, parent_seq_ids, next_token_ids):
                 j = seq_ids.index(parent_seq_id)

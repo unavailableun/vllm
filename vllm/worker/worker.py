@@ -197,6 +197,7 @@ class Worker:
         max_num_blocks_per_seq = 0
         context_lens: List[int] = []
         generation_block_tables: List[List[int]] = []
+        generation_token_lens: Dict[int, int] = {}  # {seq_id: generation_token_len}
         for seq_group_metadata in seq_group_metadata_list:
             if seq_group_metadata.is_prompt:
                 continue
@@ -207,25 +208,48 @@ class Worker:
 
             for seq_id in seq_ids:
                 seq_data = seq_group_metadata.seq_data[seq_id]
-                generation_token = seq_data.get_last_token_id()
-                input_tokens.append(generation_token)
-
-                context_len = seq_data.get_len()
-                position = context_len - 1
-                input_positions.append(position)
-
                 block_table = seq_group_metadata.block_tables[seq_id]
                 generation_block_tables.append(block_table)
 
-                max_context_len = max(max_context_len, context_len)
                 max_num_blocks_per_seq = max(max_num_blocks_per_seq,
                                              len(block_table))
-                context_lens.append(context_len)
+
+                # regular generation token
+                generation_token = seq_data.get_last_token_id()
+                input_tokens.append(generation_token)
+                context_len = seq_data.get_len()
+                position = context_len - 1
+                input_positions.append(position)
+                generation_token_len = len(generation_token)
 
                 block_number = block_table[position // self.block_size]
                 block_offset = position % self.block_size
                 slot = block_number * self.block_size + block_offset
                 slot_mapping.append(slot)
+
+                # reference token
+                enable_reference = True  # TODO: make it configurable.
+                if enable_reference:
+                    # Add the predict tokens to the input.
+                    predict_tokens = seq_data.reference_dict.get(generation_token, None)
+                    if predict_tokens is not None:
+                        input_tokens.extend(predict_tokens)
+                        generation_token_len += len(predict_tokens)
+                        predict_token_positions = range(position + 1, position + 1 + len(predict_tokens))
+                        input_positions.extend(predict_token_positions)
+                        context_len += len(predict_tokens)
+                        seq_data.predict_tokens = predict_tokens
+                        for position in predict_token_positions:
+                            block_number = block_table[position // self.block_size]
+                            block_offset = position % self.block_size
+                            slot = block_number * self.block_size + block_offset
+                            slot_mapping.append(slot)
+
+                max_context_len = max(max_context_len, context_len)
+                #  TODO: regular generation token and predict tokens share same context_len
+                #  might have issue ???
+                context_lens.append(context_len)
+                generation_token_lens[seq_id] = generation_token_len
 
         # Optimization: Pad the input length to be a multiple of 8.
         # This is required for utilizing the Tensor Cores in NVIDIA GPUs.
@@ -235,8 +259,8 @@ class Worker:
         # Convert to tensors.
         tokens_tensor = torch.cuda.LongTensor(input_tokens)
         positions_tensor = torch.cuda.LongTensor(input_positions)
-        slot_mapping_tensor = torch.cuda.IntTensor(slot_mapping)
-        context_lens_tensor = torch.cuda.IntTensor(context_lens)
+        slot_mapping_tensor = torch.cuda.IntTensor(slot_mapping)  # [num_tokens]
+        context_lens_tensor = torch.cuda.IntTensor(context_lens)  # [num_seqs]
         padded_block_tables = [
             _pad_to_max(block_table, max_num_blocks_per_seq)
             for block_table in generation_block_tables
@@ -251,6 +275,7 @@ class Worker:
             seq_groups=seq_groups,
             seq_data=seq_data,
             prompt_lens=prompt_lens,
+            generation_token_lens=generation_token_lens,
             slot_mapping=slot_mapping_tensor,
             context_lens=context_lens_tensor,
             max_context_len=max_context_len,
