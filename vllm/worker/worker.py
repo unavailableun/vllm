@@ -220,7 +220,7 @@ class Worker:
                 context_len = seq_data.get_len()
                 position = context_len - 1
                 input_positions.append(position)
-                generation_token_len = len(generation_token)
+                generation_token_len = 1
 
                 block_number = block_table[position // self.block_size]
                 block_offset = position % self.block_size
