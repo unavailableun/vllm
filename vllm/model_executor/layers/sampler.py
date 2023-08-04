@@ -407,7 +407,7 @@ def _sample(
                 output_logprobs[next_token_id] = logprob[next_token_id].item()
                 seq_outputs[seq_id] = SequenceOutputs(seq_id, seq_id,
                                                       [next_token_id],
-                                                      output_logprobs)
+                                                      [output_logprobs])
         else:
             # Generate the next tokens for generation tokens.
             # TODO: get next tokens per seq, including predict tokens.

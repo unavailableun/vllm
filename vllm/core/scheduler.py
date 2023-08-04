@@ -333,15 +333,23 @@ class Scheduler:
                 # handle reference case
                 predict_token_ids = seq.data.predict_token_ids
                 output_tokens_list = output.output_tokens
-                output_logprobs_list = output.output_logprobs
-                pred_correct = True  # the first output token is always ground truth
-                for i , (output_token, logprobs) in enumerate(zip(output_tokens_list, output_logprobs_list)):
-                    if pred_correct:
-                        seq.append_token_id(output_token, logprobs)
-                        pred_correct = output_token == predict_token_ids[i]
+                print(f"predict_token_ids: {predict_token_ids}")
+                print(f"output_tokens_list: {output_tokens_list}")
+                output_logprobs_list = output.logprobs
+                predict_correct_tokens = []
+                for i in range(len(predict_token_ids)):
+                    if predict_token_ids[i] == output_tokens_list[i]:
+                        predict_correct_tokens.append(predict_token_ids[i])
                     else:
-                        seq.data.predict_token_ids.clear()
                         break
+                predict_correct_len = len(predict_correct_tokens)
+                print(f"predict_correct_len: {predict_correct_len}")
+                print(f"predict_correct_tokens: {predict_correct_tokens}")
+                output_tokens_list = output_tokens_list[0:1+predict_correct_len]
+                output_logprobs_list = output_logprobs_list[0:1+predict_correct_len]
+                for i , (output_token, logprobs) in enumerate(zip(output_tokens_list, output_logprobs_list)):
+                    seq.append_token_id(output_token, logprobs)
+                seq.data.predict_token_ids.clear()
 
         # Return a shallow copy of the running queue to prevent the queue
         # from being modified by the caller.
