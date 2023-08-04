@@ -51,16 +51,19 @@ class Sampler(nn.Module):
         # Remove paddings in vocab (if any).
         logits = logits[:, :self.vocab_size]
 
-        # Apply presence and frequency penalties.
-        output_tokens = _get_output_tokens(input_metadata)
-        # assert len(output_tokens) == logits.shape[0]
-        # TODO: handle penalty for reference case
-        presence_penalties, frequency_penalties = _get_penalties(
-            input_metadata)
-        assert len(presence_penalties) == logits.shape[0]
-        assert len(frequency_penalties) == logits.shape[0]
-        logits = _apply_penalties(logits, output_tokens, presence_penalties,
-                                  frequency_penalties, self.vocab_size)
+        enable_reference = True  # TODO: make it configurable.
+        if not enable_reference:
+            # skip penalty for reference case currently.
+            # TODO: handle penalty for reference case
+            # Apply presence and frequency penalties.
+            output_tokens = _get_output_tokens(input_metadata)  # [num_seqs]
+            # assert len(output_tokens) == logits.shape[0]
+            presence_penalties, frequency_penalties = _get_penalties(
+                input_metadata)
+            assert len(presence_penalties) == logits.shape[0]
+            assert len(frequency_penalties) == logits.shape[0]
+            logits = _apply_penalties(logits, output_tokens, presence_penalties,
+                                    frequency_penalties, self.vocab_size)
 
         # Apply temperature scaling.
         temperatures = _get_temperatures(input_metadata)
@@ -78,14 +81,16 @@ class Sampler(nn.Module):
         # Compute the log probabilities (before applying top-p and top-k).
         logprobs = torch.log(probs)
 
-        # Apply top-p and top-k truncation.
-        # TODO: handle top_k top_p for reference case
-        top_ps, top_ks = _get_top_p_top_k(input_metadata, self.vocab_size)
-        assert len(top_ps) == len(top_ks) == probs.shape[0]
-        do_top_p = any(p < 1.0 - _SAMPLING_EPS for p in top_ps)
-        do_top_k = any(k != self.vocab_size for k in top_ks)
-        if do_top_p or do_top_k:
-            probs = _apply_top_p_top_k(probs, top_ps, top_ks)
+        if not enable_reference:
+            # skip top_k top_p for reference case currently.
+            # TODO: handle top_k top_p for reference case
+            # Apply top-p and top-k truncation.
+            top_ps, top_ks = _get_top_p_top_k(input_metadata, self.vocab_size)
+            assert len(top_ps) == len(top_ks) == probs.shape[0]
+            do_top_p = any(p < 1.0 - _SAMPLING_EPS for p in top_ps)
+            do_top_k = any(k != self.vocab_size for k in top_ks)
+            if do_top_p or do_top_k:
+                probs = _apply_top_p_top_k(probs, top_ps, top_ks)
 
         # Sample the next tokens.
         return _sample(probs, logprobs, input_metadata)
@@ -356,9 +361,10 @@ def _sample_from_generation_tokens(
         next_token_ids = [beam_outputs[seq_id][1] for seq_id in seq_ids]
     elif sampling_params.temperature < _SAMPLING_EPS:
         # Greedy sampling.
+        # only support Greedy sampling for reference case currently.
         assert len(seq_ids) == 1
-        next_token_id = torch.argmax(probs, dim=-1)
-        next_token_ids = [int(next_token_id.item())]
+        next_token_ids = torch.argmax(probs, dim=-1)
+        next_token_ids = [next_token_ids.tolist()]  # [len(seq_ids), 1 + len(predict tokens)]
         parent_seq_ids = seq_ids
     else:
         # Random sampling.
@@ -405,9 +411,11 @@ def _sample(
         else:
             # Generate the next tokens for generation tokens.
             # TODO: get next tokens per seq, including predict tokens.
-            prob = probs[idx:idx + len(seq_ids)]
-            logprob = logprobs[idx:idx + len(seq_ids)]
-            idx += len(seq_ids)
+            group_generation_token_lens = [input_metadata.generation_token_lens[seq_id] for seq_id in seq_ids]
+            group_token_len = sum(group_generation_token_lens)  # including predict tokens
+            prob = probs[idx:idx + group_token_len]  # [1 + len(predict tokens), vocab_size]
+            logprob = logprobs[idx:idx + group_token_len]
+            idx += group_token_len
 
             # Sample the next tokens.
             seq_logprobs = [
@@ -419,23 +427,25 @@ def _sample(
 
             # Get top-k log probabilities for the next tokens.
             next_logprobs: Dict[int, Dict[int, float]] = {}
-            for j, seq_id in enumerate(seq_ids):
-                next_logprobs[seq_id] = _get_topk_logprobs(
+            for j in range(group_token_len):
+                next_logprobs[j] = _get_topk_logprobs(
                     logprob[j], sampling_params.logprobs)
 
             # Build the output.
-            # TODO: Adapt multiple output_tokens per seq
-            for seq_id, parent_seq_id, next_token_id in zip(
+            j = 0
+            for seq_id, parent_seq_id, next_token_id_list in zip(
                     seq_ids, parent_seq_ids, next_token_ids):
-                j = seq_ids.index(parent_seq_id)
-                output_logprobs = next_logprobs[parent_seq_id].copy()
-                output_logprobs[next_token_id] = logprob[j,
-                                                         next_token_id].item()
+                output_logprobs_list = []
+                for next_token_id in next_token_id_list:
+                    output_logprobs = next_logprobs[j].copy()
+                    output_logprobs[next_token_id] = logprob[j, next_token_id].item()
+                    output_logprobs_list.append(output_logprobs)
+                    j += 1
                 seq_outputs[seq_id] = SequenceOutputs(
                     seq_id,
                     parent_seq_id,
-                    next_token_id,
-                    output_logprobs,
+                    next_token_id_list,
+                    output_logprobs_list,
                 )
 
     return seq_outputs

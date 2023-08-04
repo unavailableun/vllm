@@ -277,7 +277,7 @@ class SequenceOutputs:
         parent_seq_id: The ID of the parent sequence (for forking in beam
             search).
         output_tokens: The output token IDs. Multiple tokens may be generated for reference case.
-        logprobs: The logprobs of the output token.
+        logprobs: The list of logprobs of the output tokens.
             (Token id -> logP(x_i+1 | x_0, ..., x_i))
     """
 
@@ -286,7 +286,7 @@ class SequenceOutputs:
         seq_id: int,
         parent_seq_id: int,
         output_tokens: List[int],
-        logprobs: Dict[int, float],
+        logprobs: List[Dict[int, float]],
     ) -> None:
         self.seq_id = seq_id
         self.parent_seq_id = parent_seq_id

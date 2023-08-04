@@ -330,7 +330,19 @@ class Scheduler:
             for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
                 # Append a new token to the sequence.
                 output = seq_outputs[seq.seq_id]
-                seq.append_token_id(output.output_token, output.logprobs)
+                # handle reference case
+                predict_token_ids = seq.data.predict_token_ids
+                output_tokens_list = output.output_tokens
+                output_logprobs_list = output.output_logprobs
+                pred_correct = True  # the first output token is always ground truth
+                for i , (output_token, logprobs) in enumerate(zip(output_tokens_list, output_logprobs_list)):
+                    if pred_correct:
+                        seq.append_token_id(output_token, logprobs)
+                        pred_correct = output_token == predict_token_ids[i]
+                    else:
+                        seq.data.predict_token_ids.clear()
+                        break
+
         # Return a shallow copy of the running queue to prevent the queue
         # from being modified by the caller.
         return self.running.copy()
