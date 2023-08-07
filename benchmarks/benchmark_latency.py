@@ -34,13 +34,17 @@ def main(args: argparse.Namespace):
     )
     print(sampling_params)
     dummy_prompt_token_ids = [[0] * args.input_len] * args.batch_size
+    prompts = ["Who is Donald Trump"] * args.batch_size
 
     def run_to_completion(profile: bool = False):
         if profile:
             torch.cuda.cudart().cudaProfilerStart()
         start_time = time.time()
 
-        llm.generate(prompt_token_ids=dummy_prompt_token_ids,
+        # llm.generate(prompt_token_ids=dummy_prompt_token_ids,
+        #              sampling_params=sampling_params,
+        #              use_tqdm=False)
+        llm.generate(prompts=prompts,
                      sampling_params=sampling_params,
                      use_tqdm=False)
 
