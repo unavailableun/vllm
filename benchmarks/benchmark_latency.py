@@ -26,7 +26,7 @@ def main(args: argparse.Namespace):
 
     sampling_params = SamplingParams(
         n=args.n,
-        temperature=0.0 if args.use_beam_search else 1.0,
+        temperature=0.0 if args.use_beam_search else args.temperature,
         top_p=1.0,
         use_beam_search=args.use_beam_search,
         ignore_eos=True,
@@ -77,5 +77,6 @@ if __name__ == '__main__':
                         help='Number of iterations to run.')
     parser.add_argument('--trust-remote-code', action='store_true',
                         help='trust remote code from huggingface')
+    parser.add_argument('--temperature', type=float, default=1.0)
     args = parser.parse_args()
     main(args)
