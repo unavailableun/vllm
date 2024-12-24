@@ -1,3 +1,4 @@
+import nvtx
 import itertools
 import warnings
 from contextlib import contextmanager
@@ -920,6 +921,7 @@ class LLM:
             whitespace_pattern=guided_options.guided_whitespace_pattern)
         return params
 
+    @nvtx.annotate("llm.py _run_engine()")
     def _run_engine(
             self, *, use_tqdm: bool
     ) -> List[Union[RequestOutput, EmbeddingRequestOutput]]:

@@ -1,3 +1,4 @@
+import nvtx
 import time
 from collections import Counter as collectionsCounter
 from collections import deque
@@ -1325,6 +1326,7 @@ class LLMEngine:
                 else:
                     seq.append_token_id(sample.output_token, sample.logprobs)
 
+    @nvtx.annotate("LLMEngine.step")
     def step(self) -> List[Union[RequestOutput, EmbeddingRequestOutput]]:
         """Performs one decoding iteration and returns newly generated results.
 
@@ -1435,24 +1437,26 @@ class LLMEngine:
             last_sampled_token_ids = \
                 self._get_last_sampled_token_ids(virtual_engine)
 
-            execute_model_req = ExecuteModelRequest(
-                seq_group_metadata_list=seq_group_metadata_list,
-                blocks_to_swap_in=scheduler_outputs.blocks_to_swap_in,
-                blocks_to_swap_out=scheduler_outputs.blocks_to_swap_out,
-                blocks_to_copy=scheduler_outputs.blocks_to_copy,
-                num_lookahead_slots=scheduler_outputs.num_lookahead_slots,
-                running_queue_size=scheduler_outputs.running_queue_size,
-                finished_requests_ids=finished_requests_ids,
-                # We use ExecuteModelRequest to pass the last sampled_token_ids
-                # to each of the non-last PP stages for in-place prepare_input.
-                last_sampled_token_ids=last_sampled_token_ids)
+            with nvtx.annotate("LLMEngine.ExecuteModelRequest"):
+                execute_model_req = ExecuteModelRequest(
+                    seq_group_metadata_list=seq_group_metadata_list,
+                    blocks_to_swap_in=scheduler_outputs.blocks_to_swap_in,
+                    blocks_to_swap_out=scheduler_outputs.blocks_to_swap_out,
+                    blocks_to_copy=scheduler_outputs.blocks_to_copy,
+                    num_lookahead_slots=scheduler_outputs.num_lookahead_slots,
+                    running_queue_size=scheduler_outputs.running_queue_size,
+                    finished_requests_ids=finished_requests_ids,
+                    # We use ExecuteModelRequest to pass the last sampled_token_ids
+                    # to each of the non-last PP stages for in-place prepare_input.
+                    last_sampled_token_ids=last_sampled_token_ids)
 
             if allow_async_output_proc:
                 execute_model_req.async_callback = self.async_callbacks[
                     virtual_engine]
 
-            outputs = self.model_executor.execute_model(
-                execute_model_req=execute_model_req)
+            with nvtx.annotate("LLMEngine.execute_model"):
+                outputs = self.model_executor.execute_model(
+                    execute_model_req=execute_model_req)
 
             # We need to do this here so that last step's sampled_token_ids can
             # be passed to the next iteration for PP.
@@ -1462,7 +1466,8 @@ class LLMEngine:
             # Nothing scheduled => If there is pending async postprocessor,
             # then finish it here.
             if len(ctx.output_queue) > 0:
-                self._process_model_outputs(ctx=ctx)
+                with nvtx.annotate("1470: LLMEngine._process_model_outputs"):
+                    self._process_model_outputs(ctx=ctx)
             # No outputs in this case
             outputs = []
 
@@ -1471,59 +1476,61 @@ class LLMEngine:
             for seq_group in seq_group_metadata_list:
                 seq_group.finish_step()
 
-        if not self._has_remaining_steps(seq_group_metadata_list):
-            # clear the cache if we have finished all the steps.
-            if self.scheduler_config.is_multi_step:
-                self.cached_scheduler_outputs[0] = SchedulerOutputState()
+        with nvtx.annotate("LLMEngine handle remaining steps"):
+            if not self._has_remaining_steps(seq_group_metadata_list):
+                # clear the cache if we have finished all the steps.
+                if self.scheduler_config.is_multi_step:
+                    self.cached_scheduler_outputs[0] = SchedulerOutputState()
 
-            # is_first_step_output is True only when the num_steps of all
-            # the sequences are 1. When the num_steps > 1,
-            # multi_step_model_runner does the first-step output append.
-            is_first_step_output: bool = False if not seq_group_metadata_list \
-                else seq_group_metadata_list[0].state.num_steps == 1
+                # is_first_step_output is True only when the num_steps of all
+                # the sequences are 1. When the num_steps > 1,
+                # multi_step_model_runner does the first-step output append.
+                is_first_step_output: bool = False if not seq_group_metadata_list \
+                    else seq_group_metadata_list[0].state.num_steps == 1
 
-            # Add results to the output_queue
-            ctx.append_output(outputs=outputs,
-                              seq_group_metadata_list=seq_group_metadata_list,
-                              scheduler_outputs=scheduler_outputs,
-                              is_async=allow_async_output_proc,
-                              is_last_step=True,
-                              is_first_step_output=is_first_step_output)
+                # Add results to the output_queue
+                ctx.append_output(outputs=outputs,
+                                seq_group_metadata_list=seq_group_metadata_list,
+                                scheduler_outputs=scheduler_outputs,
+                                is_async=allow_async_output_proc,
+                                is_last_step=True,
+                                is_first_step_output=is_first_step_output)
 
-            if outputs and allow_async_output_proc:
-                assert len(outputs) == 1, (
-                    "Async postprocessor expects only a single output set")
+                if outputs and allow_async_output_proc:
+                    assert len(outputs) == 1, (
+                        "Async postprocessor expects only a single output set")
 
-                self._advance_to_next_step(
-                    outputs[0], seq_group_metadata_list,
-                    scheduler_outputs.scheduled_seq_groups)
+                    self._advance_to_next_step(
+                        outputs[0], seq_group_metadata_list,
+                        scheduler_outputs.scheduled_seq_groups)
 
-            # Check if need to run the usual non-async path
-            if not allow_async_output_proc:
-                self._process_model_outputs(ctx=ctx)
+                # Check if need to run the usual non-async path
+                if not allow_async_output_proc:
+                    self._process_model_outputs(ctx=ctx)
 
-                # Log stats.
-                self.do_log_stats(scheduler_outputs, outputs)
+                    # Log stats.
+                    self.do_log_stats(scheduler_outputs, outputs)
 
-                # Tracing
-                self.do_tracing(scheduler_outputs)
-        else:
-            # Multi-step case
-            return ctx.request_outputs
+                    # Tracing
+                    self.do_tracing(scheduler_outputs)
+            else:
+                # Multi-step case
+                return ctx.request_outputs
 
-        if not self.has_unfinished_requests():
-            # Drain async postprocessor (if exists)
-            if len(ctx.output_queue) > 0:
-                self._process_model_outputs(ctx=ctx)
-            assert len(ctx.output_queue) == 0
+        with nvtx.annotate("LLMEngine handle unfinished requests"):
+            if not self.has_unfinished_requests():
+                # Drain async postprocessor (if exists)
+                if len(ctx.output_queue) > 0:
+                    self._process_model_outputs(ctx=ctx)
+                assert len(ctx.output_queue) == 0
 
-            # Stop the execute model loop in parallel workers until there are
-            # more requests to process. This avoids waiting indefinitely in
-            # torch.distributed ops which may otherwise timeout, and unblocks
-            # the RPC thread in the workers so that they can process any other
-            # queued control plane messages, such as add/remove lora adapters.
-            logger.debug("Stopping remote worker execution loop.")
-            self.model_executor.stop_remote_worker_execution_loop()
+                # Stop the execute model loop in parallel workers until there are
+                # more requests to process. This avoids waiting indefinitely in
+                # torch.distributed ops which may otherwise timeout, and unblocks
+                # the RPC thread in the workers so that they can process any other
+                # queued control plane messages, such as add/remove lora adapters.
+                logger.debug("Stopping remote worker execution loop.")
+                self.model_executor.stop_remote_worker_execution_loop()
 
         return ctx.request_outputs
 
